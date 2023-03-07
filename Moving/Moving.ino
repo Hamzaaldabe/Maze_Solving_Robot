@@ -1,5 +1,5 @@
 #include <NewPing.h>
-#include <PID_v1.h>
+#include <PID_v1_bc.h>
 #define in1 13 
 #define in2 12 
 #define in3 9 
@@ -13,24 +13,22 @@
 #define MAX_DISTANCE 293
 volatile unsigned long count = 0;
 unsigned long count_prev = 0;
-float Theta, RPM, RPM_d;
-float Theta_prev = 0;
-int dt;
-#define pi 3.1416
-float Vmax = 6;
-float Vmin = -6;
-float V = 0.1;
-float e, e_prev = 0, inte, inte_prev = 0;
 
-int LeftMotorENCA_DATA,LeftMotorENCB_DATA;
+
 
 float fSensor,oldFrontSensor;
 NewPing sonarFront(TRIGGER_PINF, ECHO_PINF, MAX_DISTANCE); //setup front ultrasonic
-
+//speed
 int baseSpeed = 50 ;
 
 int RMS ;  //right motor speeed
 int LMS ;  //left motor speed
+
+volatile int pos_i = 0;
+volatile float velocity_i = 0;
+volatile long prevT_i = 0;
+long prevT = 0;
+int posPrev = 0;
 
 volatile long Pulse_Per_Rev_Left=0;
 volatile long Pulse_Per_Rev_Right=0;
@@ -38,58 +36,81 @@ unsigned long currentTime;
 unsigned long prevTime=0;
 unsigned long RPM_Right=0;
 unsigned long RPM_Left=0;
+
+//PID constants
+const double pidKp = 1.0;
+const double pidKi = 0.0;
+const double pidKd = 0.0;
+
+//pid vars
+double LeftSetpoint=189;
+double RightSetpoint=125;
+double LeftInput = 0;
+double RightInput = 0;
+double LeftOutput = 0;
+double RightOutput = 0;
+
+//PID instance
+PID LeftPID(&LeftInput,&LeftOutput,&LeftSetpoint,pidKp, pidKi, pidKd, DIRECT);
+PID RightPID(&RightInput,&RightOutput,&RightSetpoint,pidKp, pidKi, pidKd, DIRECT);
+
+
 void setup() {
   // put your setup code here, to run once:
 Serial.begin(9600);
 pinMode(LeftMotorENCA, INPUT_PULLUP);
 pinMode(RightMotorENCA, INPUT_PULLUP);
-attachInterrupt(digitalPinToInterrupt(LeftMotorENCA), ISR_LeftMotor, FALLING);
-attachInterrupt(digitalPinToInterrupt(RightMotorENCA), ISR_RightMotor, FALLING);
-
-// unsigned int pingSpeed = 30; // frequincy of sending ping
-// unsigned long pingTimer;     // wait time for next ping
+attachInterrupt(digitalPinToInterrupt(LeftMotorENCA), ISR_LeftMotor, RISING);
+attachInterrupt(digitalPinToInterrupt(RightMotorENCA), ISR_RightMotor, RISING);
 for(int i =8;i<14;i++){
   pinMode(i,OUTPUT);
 }
 
 
-
-// cli();
-// TCCR1A = 0;
-// TCCR1B = 0;
-// TCNT1 = 0;
-// OCR1A = 12499; //Prescaler = 64
-// TCCR1B |= (1 << WGM12);
-// TCCR1B |= (1 << CS11 | 1 << CS10);
-// TIMSK1 |= (1 << OCIE1A);
-// sei();
-
-
+//PID Tuning
+  LeftPID.SetMode(AUTOMATIC);
+  LeftPID.SetSampleTime(10);
+  LeftPID.SetOutputLimits(-255, 255);
+  RightPID.SetMode(AUTOMATIC);
+  RightPID.SetSampleTime(10);
+  RightPID.SetOutputLimits(-255, 255);
+  
+  analogWrite(ENA, 125);
+  analogWrite(ENB, 125);
+//delay(5000);  
 }
 
 void loop() {
+  //delay(2000);
+  Serial.println("started");
+  Serial.println("Left Speed: ");
+  
+  
+  //runMotors();
 
+  // Calculate motor speeds (in RPM)
+  //double LeftSpeed = calculateSpeed(Pulse_Per_Rev_Left);
+  //double RightSpeed = calculateSpeed(Pulse_Per_Rev_Left);
+  // read the position and velocity
+  
 
- //if(prevTime + 2000 < currentTime){
-    delay(2000);
-//   //Serial.println("started");
-   Forward();
-   runMotors();
-//  //}
- 
-// Serial.print("RPM_Right: ");
-// Serial.print(Pulse_Per_Rev_Right);
-// Serial.print(" ");
-// Serial.print("RPM_Left: ");
-// Serial.print(Pulse_Per_Rev_Left);
-// Serial.println(" ");
-//   Serial.print("Time: ");
-//   Serial.println(currentTime);
-//   // RPM_Right=0;
-//   // RPM_Left =0;
-// ReadFront();
+  
+  Serial.println(velocity1);
+  double LeftSpeed = calculateSpeed(velocity1);
 
-delay(100000);
+  // Update PID inputs
+  LeftInput = LeftSpeed;
+  //RightInput = RightSpeed;
+  
+   // Compute PID outputs
+  LeftPID.Compute();
+  RightPID.Compute();
+
+  // Set motor speeds
+  setMotorSpeed(ENB, LeftOutput);
+  setMotorSpeed(ENA, RightOutput);
+
+  //delay(100000);
 
 }
 void Forward(){
@@ -120,43 +141,67 @@ void Stop(){
 }
 
 void runMotors() {
-  ReadFront();
-  oldFrontSensor = fSensor;
-   Serial.print("Front: ");
-    Serial.println(fSensor);
-  RMS = map(baseSpeed, 0, 1023, 0 , 1023);
-  LMS = map(baseSpeed , 0, 1023, 0 , 1023);
-  prevTime=millis();
-  analogWrite(ENA, 600);
-  analogWrite(ENB, 610);
-  while(oldFrontSensor - 18.2 < fSensor){
-    ReadFront();
-    Serial.print("Front: ");
-    Serial.println(fSensor);
-  }
+  // Pulse_Per_Rev_Left=0;
+  // Pulse_Per_Rev_Right=0;
+
   
-  Stop();
-  analogWrite(ENA, 0);
-  analogWrite(ENB, 0);
-  currentTime=millis() - prevTime;
+  // ReadFront();
+  // oldFrontSensor = fSensor;
+  // Serial.print("Front: "); 
+  // Serial.println(fSensor);
+  // prevTime=millis();
+
+  
+
+  //analogWrite(ENA, 125);
+  //analogWrite(ENB, 125);
+  // while(oldFrontSensor - 18.2 < fSensor){
+  //   ReadFront();
+  //   Serial.print("Front: ");
+  //   Serial.println(fSensor);
+  // }
+  
+  // Stop();
+  // analogWrite(ENA, 0);
+  // analogWrite(ENB, 0);
+  // currentTime=millis() - prevTime;
+  //delay(2000);
 }
 
 void ISR_LeftMotor(){
   Pulse_Per_Rev_Left++;
-  if(Pulse_Per_Rev_Left % 189 == 0 ){
-    RPM_Left++;
-   // Pulse_Per_Rev_Left=0;
-  }
 }
 
 void ISR_RightMotor(){
   Pulse_Per_Rev_Right++;
-   if(Pulse_Per_Rev_Right % 206 == 0 ){
-    RPM_Right++;
-    //Pulse_Per_Rev_Right=0;
-  }
 }
 
 void ReadFront(){
   fSensor = sonarFront.ping()/100.0;
+}
+
+
+double calculateSpeed(int encoderValue)
+{
+    double speed = (double)encoderValue * 60 / 206;
+    return speed;
+}
+
+
+void setMotorSpeed(int pwmPin, double speed)
+{
+    int pwmValue = (int)abs(speed);
+    if (pwmValue > 255)
+    {
+        pwmValue = 255;
+    }
+    analogWrite(pwmPin, pwmValue);
+    // if (speed < 0)
+    // {
+    //     digitalWrite(pwmPin + 1, HIGH);
+    // }
+    // else
+    // {
+    //     digitalWrite(pwmPin + 1, LOW);
+    // }
 }
